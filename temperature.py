@@ -3,42 +3,37 @@ import matplotlib
 import matplotlib.pyplot as plt
 from functools import reduce
 import pickle
-import gc
-import time
 
-
-print("Data Read phase \n")
+print("Temp data Read phase \n")
 ########################################################################################################################
 ###                                                     Read                                                        ####
 ########################################################################################################################
 
 # Path Definition
-path = r"C:\Users\20190285\surfdrive\03_SharedFolders\Shalika_Waqas_Julien\JEMData\HP_consumption"
-filename = r"\HP_consumption_cleaned_customer_id_" #files from ID 123 to 179
+path = r"C:\Users\20190285\surfdrive\03_SharedFolders\Shalika_Waqas_Julien\JEMData\HP_temperature"
+filename = r"\hp_temperature_cleaned_customer_" #files from ID 123 to 179
 
 # Initialize
-HeatPump = dict()
+TempDic = dict()
 ID = 123
 
 # Reading excel files
 print("Looping over files:")
-
 while ID < 180: #180 is end / 125 for test
     print(ID)
-    # t1_start = time.perf_counter()
-    # t2_start = time.process_time()
     data = pd.read_excel(path + filename + str(ID) + '.xlsx')
 
     # Date Time Manip
     data['time_start'] = pd.to_datetime(data['time_start'])
 
     # Heat Pump Dict completing
-    HeatPump[ID] = data[data.flow == 9].drop(['customer_id', 'flow'], axis=1).rename(index=str, columns={"id": "DOI"}).set_index('time_start')#.drop_duplicates(keep='first')
+    TempDic[ID] = data.drop(['customer_id', 'fhr', 'hps', 'ind', 'ofc', 'out', 'usr', 'fhr_boiler'], axis=1)\
+        .rename(index=str, columns={"fhr_vloertemperatuur": "floortemp"}).rename(index=str, columns={"id": "DOI"}).set_index('time_start')
 
     # Preprocessing - Define duplicate values as averages of the two & remove duplicate
-    HeatPump[ID][HeatPump[ID].index.duplicated(keep='last')] = (HeatPump[ID][HeatPump[ID].index.duplicated(keep='first')] +
-                                                                  HeatPump[ID][HeatPump[ID].index.duplicated(keep='last')]) / 2
-    HeatPump[ID] = HeatPump[ID][~HeatPump[ID].index.duplicated(keep='first')]
+    TempDic[ID][TempDic[ID].index.duplicated(keep='last')] = (TempDic[ID][TempDic[ID].index.duplicated(keep='first')] +
+                                                                  TempDic[ID][TempDic[ID].index.duplicated(keep='last')]) / 2
+    TempDic[ID] = TempDic[ID][~TempDic[ID].index.duplicated(keep='first')]
 
     # File ID - skip missing files
     ID += 1
@@ -48,13 +43,6 @@ while ID < 180: #180 is end / 125 for test
         ID = 169
     elif ID == 171:
         ID = 177
-    del data
-    # t1_stop = time.perf_counter()
-    # t2_stop = time.process_time()
-    # print("--------------------------------------------------")
-    # print("Elapsed time: %.1f [s]" % ((t1_stop - t1_start)))
-    # print("CPU process time: %.1f [s]" % ((t2_stop - t2_start)))
-    # print("--------------------------------------------------")
 
 
 ########################################################################################################################
@@ -62,40 +50,46 @@ while ID < 180: #180 is end / 125 for test
 ########################################################################################################################
 print(" \n Data PreProcessing phase \n")
 
+# Replace 0 values with None values
+for id in list(TempDic):
+    # TempDic[id].floortemp[TempDic[id].floortemp == 0] = None
+    TempDic[id].loc[TempDic[id].floortemp == 0] = None
+    if TempDic[id].floortemp.isnull().all():    #if all values are NaN, delete data
+        del TempDic[id]
+
+
 # Fill out missing time stamps by None values
 print("Missing data loop:")
 
-id_ref = list(HeatPump.keys())[0]
-date_rng = pd.date_range(start=HeatPump[id_ref].index[0], end=HeatPump[id_ref].index[-1], freq='15min')
+id_ref = list(TempDic.keys())[0]
+date_rng = pd.date_range(start=TempDic[id_ref].index[0], end=TempDic[id_ref].index[-1], freq='15min')
 df_ref = pd.DataFrame(date_rng, columns=['time_start']).set_index('time_start')
 
-for id in HeatPump:
+for id in TempDic:
     print(id)
 
     # Index differences identification
-    IndexNone = df_ref.index.difference(HeatPump[id].index)
-    size_diff = df_ref.index.difference(HeatPump[id].index).size
+    IndexNone = df_ref.index.difference(TempDic[id].index)
+    size_diff = df_ref.index.difference(TempDic[id].index).size
     # Creat pd dataframes from differences
     NoneDataFrame = pd.DataFrame({'DOI': ["None"]*size_diff,
-                                  'consumption': [None]*size_diff,
+                                  'floortemp': [None]*size_diff,
                                   'time_start': list(IndexNone)}).set_index('time_start')
     # Concat Reference dataframe with other one
-    HeatPump[id] = pd.concat([HeatPump[id], NoneDataFrame]).sort_index()
-    del IndexNone, size_diff, NoneDataFrame
-del date_rng
-gc.collect()    # Release unreferenced memory
+    TempDic[id] = pd.concat([TempDic[id], NoneDataFrame]).sort_index()
+
 
 # # Data Size check
 # MaxDataSize = []
-# for id in HeatPump:
-#     MaxDataSize.append(HeatPump[id].consumption.values.size)
+# for id in TempDic:
+#     MaxDataSize.append(TempDic[id].floortemp.values.size)
 
 
 print("Data interpolation")
 # Missing Data interpolation
-for id in HeatPump:
-    #HeatPump[id].consumption = HeatPump[id].consumption.astype(float)
-    HeatPump[id].consumption = HeatPump[id].consumption.interpolate(method='linear', axis=0).ffill().bfill()
+for id in TempDic:
+    #TempDic[id].floortemp = TempDic[id].floortemp.astype(float)
+    TempDic[id].floortemp = TempDic[id].floortemp.interpolate(method='linear', axis=0).ffill().bfill()
 
 
 
@@ -106,17 +100,17 @@ for id in HeatPump:
 print("\n Data manipulation phase \n")
 
 # Summing consumption
-SumConsumption = pd.DataFrame
-SumConsumption = HeatPump[list(HeatPump.keys())[0]].drop('DOI', axis=1)
-for id in list(HeatPump.keys())[1:]:
-    SumConsumption = SumConsumption + HeatPump[id].drop('DOI', axis=1)
+SumTemp = pd.DataFrame
+SumTemp = TempDic[list(TempDic.keys())[0]].drop('DOI', axis=1)
+for id in list(TempDic.keys())[1:]:
+    SumTemp = SumTemp + TempDic[id].drop('DOI', axis=1)
+AvgTemp = SumTemp.apply(lambda x: x/len(TempDic.keys()))
 
 
-
-# # Plotting summed demand
+# # Plotting temp
 # plt.close('all')
-# HeatPump[123].consumption.plot()
-# SumConsumption.plot()
+# TempDic[124].floortemp.plot()
+# AvgTemp.plot()
 
 
 ########################################################################################################################
@@ -124,16 +118,15 @@ for id in list(HeatPump.keys())[1:]:
 ########################################################################################################################
 
 print("\n Data Saving phase \n")
-SumConsumption.to_csv(r"C:\Users\20190285\surfdrive\05_Data\052_District_Pricenhage\0521_HeatPump"+"\HP_consumption_Sum.csv", index=True)
-f = open(r"C:\Users\20190285\surfdrive\05_Data\052_District_Pricenhage\0521_HeatPump"+"\HeatPump.pkl","wb")
-pickle.dump(HeatPump,f)
+AvgTemp.to_csv(r"C:\Users\20190285\surfdrive\05_Data\052_District_Pricenhage\0521_HeatPump"+"\HP_floortemp_avg.csv", index=True)
+f = open(r"C:\Users\20190285\surfdrive\05_Data\052_District_Pricenhage\0521_HeatPump"+"\TempDic.pkl","wb")
+pickle.dump(TempDic,f)
 f.close()
 
 
 
 # # check
-# HeatPump[123].loc["2017-03-05 12:45:00"]
-# HeatPump[124].loc["2017-12-30 12:30:00"]
+# TempDic[123].loc["2017-09-08 14:45:00"]
+# TempDic[123].loc["2017-12-31 16:45:00"]
+# TempDic[124].loc["2017-12-30 12:30:00"]
 
-# (SumConsumption.loc["2017-01-26 06:30:00"] + SumConsumption.loc["2017-01-26 06:45:00"] \
-# + SumConsumption.loc["2017-01-26 05:45:00"] + SumConsumption.loc["2017-01-26 07:00:00"])/15*60
